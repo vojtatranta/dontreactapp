@@ -8,14 +8,17 @@ type GetComponentProps<T extends (props: object, state: object, context: object)
 type GetComponentState<T extends (props: object, state: object, context: object) => unknown> = T extends (arg1: infer U, arg2: infer S, ...args: unknown[]) => unknown ? S : never;
 type GetComponentContext<T extends (props: object, state: object, context: object) => unknown> = T extends (arg1: infer U, arg2: infer S, arg3: infer C) => unknown ? C : never;
 
+type ComponentFactoryType<CT extends DontReactComponentType = DontReactComponentType> = (state: GetComponentState<CT>) => (context: GetComponentContext<CT>) => DontReactElementType<GetComponentProps<CT>, GetComponentState<CT>, GetComponentContext<CT>>
+
 type DontReactElementType<P = object, S = object, C = object> = {
   type: string
   props: P
-  children: string | DontReactElementType | Array<string | DontReactElementType> | null
+  children: string | ComponentFactoryType<DontReactComponentType> | Array<string | DontReactElementType> | null
   attributes: object
   state: S
   context: C
 }
+
 
 type DontReactComponentType = (props: object, state: object, context: object) => DontReactElementType
 
@@ -27,13 +30,40 @@ type AppContext = {
 }
 
 
-
-function componentFactory<CT extends DontReactComponentType>(aComponent: CT, props: GetComponentProps<CT>): (state: GetComponentState<CT>) => (context: GetComponentContext<CT>) => DontReactElementType<GetComponentProps<CT>, GetComponentState<CT>, GetComponentContext<CT>> {
+function componentFactory<CT extends DontReactComponentType>(aComponent: CT, props: GetComponentProps<CT>): ComponentFactoryType<CT> {
   return (state) => context => aComponent(props, state, context)
 }
 
 
+function ASubtitleComponent(props: { subtitle: string }, state: undefined, context: AppContext) {
+  return {
+    type: "h2",
+    props: props,
+    children: [
+      props.subtitle,
+    ],
+    state,
+    context
+  }
+}
 
+
+
+function AContainer(props: {}, state: { isOn: boolean } = {isOn: false}, context: AppContext) {
+  return {
+    type: "div",
+    props: props,
+    attributes: {
+      className: "text-5xl font-extrabold tracking-tight text-white sm:text-[5rem]",
+    },
+    children: [
+      componentFactory(ATitleComponent, {title: "Main title"}),
+      componentFactory(ASubtitleComponent, {subtitle: "Subtitle"}),
+    ],
+    state,
+    context
+  }
+}
 function ATitleComponent(props: { title: string }, state: { isOn: boolean } = {isOn: false}, context: AppContext) {
   return {
     type: "h1",
@@ -41,19 +71,11 @@ function ATitleComponent(props: { title: string }, state: { isOn: boolean } = {i
     attributes: {
       onClick: () => {
         context.setState({isOn: !state.isOn})
-        context.runSideEffect()
       },
       className: "text-5xl font-extrabold tracking-tight text-white sm:text-[5rem]",
     },
     children: [
       props.title,
-      {
-        type: "span",
-        props: {
-          className: "text-[hsl(280,100%,70%)]",
-          children: "T3"
-        }
-      },
       state.isOn ? "On" : "Off",
     ],
     state,
@@ -64,13 +86,14 @@ function ATitleComponent(props: { title: string }, state: { isOn: boolean } = {i
 function runDontReactApp<CT extends DontReactComponentType>(element: HTMLElement, component: CT, compProps: GetComponentProps<CT>, context: GetComponentContext<CT>)  {
   element.innerHTML = ""
 
-  const render = <CTX extends AppContext>(result: DontReactElementType, hereContext: CTX) => {
+  const render = <CTX extends GetComponentContext<CT>>(result: DontReactElementType, localContext: CTX) => {
     const { type, attributes = {}, children, props} = result
     const onClick = "onClick" in attributes ? attributes.onClick : null
     const actualChildren = children ?? ("children" in props && props.children) ?? null
     const newElement = document.createElement(type)
     if (onClick) {
       newElement.addEventListener("click", onClick)
+      delete attributes.onClick
     }
     Object.entries(attributes).forEach(([key, value]) => {
       if (key === "className") {
@@ -85,6 +108,9 @@ function runDontReactApp<CT extends DontReactComponentType>(element: HTMLElement
       actualChildren.forEach((child) => {
         if (typeof child === "string") {
           newElement.appendChild(document.createTextNode(child))
+        } else if (typeof child === "function") {
+          const childResult = child(result.state)(localContext)
+          newElement.appendChild(render(childResult, localContext))
         } else {
           newElement.appendChild(render(child))
         }
@@ -131,7 +157,7 @@ export default function Home() {
   useEffect(() => {
     const elem = document.getElementById("dontreactapp")
     if (elem) {
-      runDontReactApp(elem, ATitleComponent, {title: "Hello"}, {runSideEffect: () => {alert("Efect!")}})
+      runDontReactApp(elem, AContainer, {title: "Hello"}, {runSideEffect: () => {alert("Efect!")}})
     }
       
   }, []);
