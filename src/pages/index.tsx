@@ -22,6 +22,8 @@ type DontReactComponentType = (props: object, state: object, context: object) =>
 type AppContext = {
   runSideEffect: () => void
   setState: <S extends object>(newState: S) => (S)
+  onMount: () => void
+  onUnmount: () => void
 }
 
 
@@ -37,6 +39,10 @@ function ATitleComponent(props: { title: string }, state: { isOn: boolean } = {i
     type: "h1",
     props: props,
     attributes: {
+      onClick: () => {
+        context.setState({isOn: !state.isOn})
+        context.runSideEffect()
+      },
       className: "text-5xl font-extrabold tracking-tight text-white sm:text-[5rem]",
     },
     children: [
@@ -58,10 +64,14 @@ function ATitleComponent(props: { title: string }, state: { isOn: boolean } = {i
 function runDontReactApp<CT extends DontReactComponentType>(element: HTMLElement, component: CT, compProps: GetComponentProps<CT>, context: GetComponentContext<CT>)  {
   element.innerHTML = ""
 
-  const render = (result: DontReactElementType) => {
+  const render = <CTX extends AppContext>(result: DontReactElementType, hereContext: CTX) => {
     const { type, attributes = {}, children, props} = result
+    const onClick = "onClick" in attributes ? attributes.onClick : null
     const actualChildren = children ?? ("children" in props && props.children) ?? null
     const newElement = document.createElement(type)
+    if (onClick) {
+      newElement.addEventListener("click", onClick)
+    }
     Object.entries(attributes).forEach(([key, value]) => {
       if (key === "className") {
         newElement.className = value as string
@@ -84,20 +94,30 @@ function runDontReactApp<CT extends DontReactComponentType>(element: HTMLElement
   }
 
   const factoried = componentFactory(component, compProps)
+  const unmounts = new Set<() => void>()
+  const mounts = new Set<() => void>()
 
   const localSetState = <S extends GetComponentState<CT>>(newState: S) => {
-    const newComponent = factoried(newState)({
-      ...context,
-      setState: localSetState
-    })
-    const newElement = render(newComponent)
-    element.replaceWith(newElement)
-    return newState
+    const nextResult = factoried(newState)(localContext)
+
+    const localSetStateResult = render(nextResult, localContext)
+    element.innerHTML = ""
+    element.appendChild(localSetStateResult)
   }
 
-  const firstRenderResult = factoried(undefined)(context)
-  console.log("firstRenderResult", firstRenderResult)
-  element.appendChild(render(firstRenderResult))
+  const localContext = {
+    ...context,
+    setState: localSetState,
+    onMount: (cb: () => void) => mounts.add(cb),
+    onUnmount: (cb: () => void) => unmounts.add(cb)
+  }
+
+  const firstRenderResult = factoried(undefined)(localContext)
+  const renderedResult = render(firstRenderResult, localContext)
+
+  element.appendChild(renderedResult)
+  Array.from(mounts).forEach((cb) => cb())
+
 
   return {
     stop() {
